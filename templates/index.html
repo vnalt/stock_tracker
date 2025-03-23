@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stock Tracker</title>
+</head>
+<body>
+    <h1>Stock Watchlist</h1>
+    <form method="POST">
+        <input type="text" name="stock_symbol" placeholder="Enter stock symbol (e.g., RELIANCE)">
+        <button type="submit">Add Stock</button>
+    </form>
+    <h2>Your Watchlist</h2>
+    <ul>
+        {% for stock in watchlist %}
+            <li>{{ stock }}</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
