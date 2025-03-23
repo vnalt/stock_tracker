@@ -73,7 +73,7 @@ def monitor_stocks():
         if updates:
             send_email("Stock Update - " + time.ctime(), "\n".join(updates))
         
-        time.sleep(3600)  # Check every hour
+        time.sleep(300)  # Check every 5 mins
 
 if __name__ == "__main__":
     # Start monitoring in a separate thread
