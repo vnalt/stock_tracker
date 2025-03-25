@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 import time
 import threading
 import pandas as pd
+from fuzzywuzzy import process
+import json
 
 app = Flask(__name__)
 
@@ -17,13 +19,29 @@ load_dotenv()
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-# Load BSE stock list (assumes Equity.csv is in the project folder)
+# Load BSE stock list
 bse_stocks = pd.read_csv("Equity.csv")
 stock_dict = {row["Security Name"].upper(): row["Security Code"] for index, row in bse_stocks.iterrows()}
-valid_stocks = set(stock_dict.keys())  # For validation
+valid_stocks = set(stock_dict.keys())
+all_stock_options = [(name.upper(), str(code)) for name, code in stock_dict.items()]
 
-# Watchlist stored in memory
-watchlist = []
+# Watchlist persistence file
+WATCHLIST_FILE = "watchlist.json"
+
+# Load watchlist from file (or initialize empty)
+def load_watchlist():
+    if os.path.exists(WATCHLIST_FILE):
+        with open(WATCHLIST_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+# Save watchlist to file
+def save_watchlist(watchlist):
+    with open(WATCHLIST_FILE, "w") as f:
+        json.dump(watchlist, f)
+
+# Initial watchlist
+watchlist = load_watchlist()
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -35,31 +53,13 @@ def home():
             stock_with_suffix = stock_symbol + ".BO"
             if stock_with_suffix not in watchlist:
                 watchlist.append(stock_with_suffix)
+                save_watchlist(watchlist)  # Save after adding
                 send_email(
                     subject="Stock Subscription Confirmation",
                     body=f"You have subscribed to updates for {stock_with_suffix}."
                 )
         else:
-            error = f"Stock '{stock_symbol}' does not exist in the BSE repository."
-    return render_template("index.html", watchlist=watchlist, error=error)
-
-@app.route("/edit", methods=["POST"])
-def edit_stock():
-    global watchlist
-    error = None
-    old_symbol = request.form.get("old_symbol")
-    new_symbol = request.form.get("new_symbol").upper()
-    if old_symbol in watchlist and new_symbol:
-        if new_symbol in valid_stocks:
-            new_symbol_with_suffix = new_symbol + ".BO"
-            if new_symbol_with_suffix not in watchlist:
-                watchlist[watchlist.index(old_symbol)] = new_symbol_with_suffix
-                send_email(
-                    subject="Stock Updated",
-                    body=f"Updated {old_symbol} to {new_symbol_with_suffix} in your watchlist."
-                )
-        else:
-            error = f"Stock '{new_symbol}' does not exist in the BSE repository."
+            error = f"Stock '{stock_symbol}' does not exist in the BSE repository. Check suggestions below."
     return render_template("index.html", watchlist=watchlist, error=error)
 
 @app.route("/delete", methods=["POST"])
@@ -68,6 +68,7 @@ def delete_stock():
     symbol = request.form.get("symbol")
     if symbol in watchlist:
         watchlist.remove(symbol)
+        save_watchlist(watchlist)  # Save after deleting
         send_email(
             subject="Stock Removed",
             body=f"Removed {symbol} from your watchlist."
@@ -76,12 +77,21 @@ def delete_stock():
 
 @app.route("/autocomplete", methods=["GET"])
 def autocomplete():
-    query = request.args.get("q", "").upper()
-    suggestions = [
-        {"name": name}
-        for name in valid_stocks
-        if query in name and name not in [s.split(".")[0] for s in watchlist]
-    ][:10]  # Top 10 matches not already in watchlist
+    query = request.args.get("q", "").upper().strip()
+    if not query:
+        return jsonify([])
+
+    searchable = [f"{name} ({code})" for name, code in all_stock_options]
+    matches = process.extractBests(query, searchable, score_cutoff=50, limit=10)
+    
+    suggestions = []
+    seen_names = set([s.split(".")[0] for s in watchlist])
+    for match, score in matches:
+        display_text = match
+        name = display_text.split(" (")[0]
+        if name not in seen_names and query in name:
+            suggestions.append({"name": name, "display": display_text})
+
     return jsonify(suggestions)
 
 def get_stock_data(stock_symbol):

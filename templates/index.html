@@ -6,44 +6,45 @@
         table { border-collapse: collapse; width: 50%; margin: 20px auto; }
         th, td { border: 1px solid black; padding: 8px; text-align: center; }
         th { background-color: #f2f2f2; }
-        .error { color: red; text-align: center; }
+        .error { color: red; text-align: center; margin: 10px 0; }
+        .input-container { position: relative; width: 300px; margin: 0 auto; }
+        #stock_symbol { width: 100%; padding: 5px; }
         #suggestions { 
             position: absolute; 
+            top: 100%; 
+            left: 0; 
             background: white; 
             border: 1px solid #ccc; 
             max-height: 200px; 
             overflow-y: auto; 
-            width: 300px; 
-            z-index: 1000;
+            width: 100%; 
+            z-index: 1000; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        #suggestions div { padding: 5px; cursor: pointer; }
+        #suggestions div { padding: 8px; cursor: pointer; }
         #suggestions div:hover { background: #f0f0f0; }
-        #stock_symbol { width: 300px; }
     </style>
 </head>
 <body>
     <h1>Stock Tracker</h1>
-    <form method="POST" action="/">
-        <input type="text" id="stock_symbol" name="stock_symbol" placeholder="Enter BSE stock (e.g., TCS)" required autocomplete="off">
-        <div id="suggestions"></div>
-        <input type="submit" value="Add Stock">
-    </form>
+    <div class="input-container">
+        <form method="POST" action="/">
+            <input type="text" id="stock_symbol" name="stock_symbol" placeholder="Enter BSE stock (e.g., TCS)" required autocomplete="off">
+            <div id="suggestions"></div>
+            <input type="submit" value="Add Stock" style="margin-top: 10px;">
+        </form>
+    </div>
     {% if error %}
         <p class="error">{{ error }}</p>
     {% endif %}
     <h2>Your Watchlist</h2>
     {% if watchlist %}
         <table>
-            <tr><th>Stock Symbol</th><th>Actions</th></tr>
+            <tr><th>Stock Symbol</th><th>Action</th></tr>
             {% for stock in watchlist %}
                 <tr>
                     <td>{{ stock }}</td>
                     <td>
-                        <form method="POST" action="/edit" style="display:inline;">
-                            <input type="hidden" name="old_symbol" value="{{ stock }}">
-                            <input type="text" name="new_symbol" placeholder="New symbol">
-                            <input type="submit" value="Edit">
-                        </form>
                         <form method="POST" action="/delete" style="display:inline;">
                             <input type="hidden" name="symbol" value="{{ stock }}">
                             <input type="submit" value="Delete" onclick="return confirm('Delete {{ stock }}?');">
