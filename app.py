@@ -7,11 +7,13 @@ from email.mime.text import MIMEText
 import os
 from dotenv import load_dotenv
 import time
+import threading
 
 app = Flask(__name__)
 
 # Load environment variables (for email credentials)
 load_dotenv()
+print("Loaded .env - EMAIL_ADDRESS:", os.getenv("EMAIL_ADDRESS"))  # Debug line
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
@@ -24,7 +26,13 @@ def home():
     if request.method == "POST":
         stock_symbol = request.form.get("stock_symbol")
         if stock_symbol and stock_symbol not in watchlist:
-            watchlist.append(stock_symbol.upper() + ".BO")  # Add .BO for BSE stocks
+            stock_symbol = stock_symbol.upper() + ".BO"  # Add .BO for BSE stocks
+            watchlist.append(stock_symbol)
+            # Send confirmation email
+            send_email(
+                subject="Stock Subscription Confirmation",
+                body=f"You have subscribed to updates for {stock_symbol}. You’ll receive notifications for price changes >5% or BSE announcements."
+            )
     return render_template("index.html", watchlist=watchlist)
 
 def get_stock_data(stock_symbol):
@@ -49,15 +57,25 @@ def get_bse_announcements(stock_symbol):
     return None
 
 def send_email(subject, body):
+    print(f"Attempting to send email: {subject}")
+    print(f"Using EMAIL_ADDRESS: {EMAIL_ADDRESS}")
+    print(f"Using EMAIL_PASSWORD: {EMAIL_PASSWORD}")
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = EMAIL_ADDRESS
     msg["To"] = EMAIL_ADDRESS
 
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.starttls()
-        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            print("Connecting to SMTP server...")
+            server.starttls()
+            print("Starting TLS...")
+            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            print("Logged in successfully")
+            server.send_message(msg)
+            print("Email sent successfully")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
 
 def monitor_stocks():
     while True:
@@ -73,14 +91,12 @@ def monitor_stocks():
         if updates:
             send_email("Stock Update - " + time.ctime(), "\n".join(updates))
         
-        time.sleep(300)  # Check every 5 mins
+        time.sleep(300)  # Check every 5 minutes
 
 if __name__ == "__main__":
     # Start monitoring in a separate thread
-    import threading
     monitor_thread = threading.Thread(target=monitor_stocks)
     monitor_thread.daemon = True
     monitor_thread.start()
     # Run the Flask app
     app.run(host="0.0.0.0", port=5000)
-    
