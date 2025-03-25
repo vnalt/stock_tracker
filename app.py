@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, jsonify
 import yfinance as yf
 import requests
 from bs4 import BeautifulSoup
@@ -19,39 +19,48 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 # Load BSE stock list (assumes Equity.csv is in the project folder)
 bse_stocks = pd.read_csv("Equity.csv")
-stock_dict = bse_stocks.set_index("Security Code").to_dict()["Security Name"]
+stock_dict = {row["Security Name"].upper(): row["Security Code"] for index, row in bse_stocks.iterrows()}
+valid_stocks = set(stock_dict.keys())  # For validation
 
-# Watchlist stored in memory (resets on restart)
+# Watchlist stored in memory
 watchlist = []
 
 @app.route("/", methods=["GET", "POST"])
 def home():
     global watchlist
+    error = None
     if request.method == "POST":
-        stock_symbol = request.form.get("stock_symbol")
-        if stock_symbol and stock_symbol.upper() + ".BO" not in watchlist:
-            stock_symbol = stock_symbol.upper() + ".BO"
-            watchlist.append(stock_symbol)
-            send_email(
-                subject="Stock Subscription Confirmation",
-                body=f"You have subscribed to updates for {stock_symbol}."
-            )
-    return render_template("index.html", watchlist=watchlist)
+        stock_symbol = request.form.get("stock_symbol").upper()
+        if stock_symbol in valid_stocks:
+            stock_with_suffix = stock_symbol + ".BO"
+            if stock_with_suffix not in watchlist:
+                watchlist.append(stock_with_suffix)
+                send_email(
+                    subject="Stock Subscription Confirmation",
+                    body=f"You have subscribed to updates for {stock_with_suffix}."
+                )
+        else:
+            error = f"Stock '{stock_symbol}' does not exist in the BSE repository."
+    return render_template("index.html", watchlist=watchlist, error=error)
 
 @app.route("/edit", methods=["POST"])
 def edit_stock():
     global watchlist
+    error = None
     old_symbol = request.form.get("old_symbol")
-    new_symbol = request.form.get("new_symbol")
+    new_symbol = request.form.get("new_symbol").upper()
     if old_symbol in watchlist and new_symbol:
-        new_symbol = new_symbol.upper() + ".BO"
-        if new_symbol not in watchlist:
-            watchlist[watchlist.index(old_symbol)] = new_symbol
-            send_email(
-                subject="Stock Updated",
-                body=f"Updated {old_symbol} to {new_symbol} in your watchlist."
-            )
-    return render_template("index.html", watchlist=watchlist)
+        if new_symbol in valid_stocks:
+            new_symbol_with_suffix = new_symbol + ".BO"
+            if new_symbol_with_suffix not in watchlist:
+                watchlist[watchlist.index(old_symbol)] = new_symbol_with_suffix
+                send_email(
+                    subject="Stock Updated",
+                    body=f"Updated {old_symbol} to {new_symbol_with_suffix} in your watchlist."
+                )
+        else:
+            error = f"Stock '{new_symbol}' does not exist in the BSE repository."
+    return render_template("index.html", watchlist=watchlist, error=error)
 
 @app.route("/delete", methods=["POST"])
 def delete_stock():
@@ -69,11 +78,11 @@ def delete_stock():
 def autocomplete():
     query = request.args.get("q", "").upper()
     suggestions = [
-        {"id": code, "name": name}
-        for code, name in stock_dict.items()
-        if query in str(code) or query in name.upper()
-    ][:10]  # Top 10 matches
-    return {"suggestions": suggestions}
+        {"name": name}
+        for name in valid_stocks
+        if query in name and name not in [s.split(".")[0] for s in watchlist]
+    ][:10]  # Top 10 matches not already in watchlist
+    return jsonify(suggestions)
 
 def get_stock_data(stock_symbol):
     stock = yf.Ticker(stock_symbol)
