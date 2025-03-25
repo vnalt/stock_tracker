@@ -48,7 +48,7 @@ def get_stock_data(stock_symbol):
 def get_bse_announcements(stock_symbol):
     url = "https://www.bseindia.com/data/xml/notices.xml"
     response = requests.get(url)
-    soup = BeautifulSoup(response.content, "xml")
+    soup = BeautifulSoup(response.content, "lxml-xml")  # Use lxml-xml instead of "xml"
     items = soup.find_all("item")
     for item in items:
         title = item.find("title").text
