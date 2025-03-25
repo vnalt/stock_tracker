@@ -8,16 +8,20 @@ import os
 from dotenv import load_dotenv
 import time
 import threading
+import pandas as pd
 
 app = Flask(__name__)
 
-# Load environment variables (for email credentials)
+# Load environment variables
 load_dotenv()
-print("Loaded .env - EMAIL_ADDRESS:", os.getenv("EMAIL_ADDRESS"))  # Debug line
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-# Watchlist stored in memory (simple for now)
+# Load BSE stock list (assumes Equity.csv is in the project folder)
+bse_stocks = pd.read_csv("Equity.csv")
+stock_dict = bse_stocks.set_index("Security Code").to_dict()["Security Name"]
+
+# Watchlist stored in memory (resets on restart)
 watchlist = []
 
 @app.route("/", methods=["GET", "POST"])
@@ -25,19 +29,55 @@ def home():
     global watchlist
     if request.method == "POST":
         stock_symbol = request.form.get("stock_symbol")
-        if stock_symbol and stock_symbol not in watchlist:
-            stock_symbol = stock_symbol.upper() + ".BO"  # Add .BO for BSE stocks
+        if stock_symbol and stock_symbol.upper() + ".BO" not in watchlist:
+            stock_symbol = stock_symbol.upper() + ".BO"
             watchlist.append(stock_symbol)
-            # Send confirmation email
             send_email(
                 subject="Stock Subscription Confirmation",
-                body=f"You have subscribed to updates for {stock_symbol}. You’ll receive notifications for price changes >5% or BSE announcements."
+                body=f"You have subscribed to updates for {stock_symbol}."
             )
     return render_template("index.html", watchlist=watchlist)
 
+@app.route("/edit", methods=["POST"])
+def edit_stock():
+    global watchlist
+    old_symbol = request.form.get("old_symbol")
+    new_symbol = request.form.get("new_symbol")
+    if old_symbol in watchlist and new_symbol:
+        new_symbol = new_symbol.upper() + ".BO"
+        if new_symbol not in watchlist:
+            watchlist[watchlist.index(old_symbol)] = new_symbol
+            send_email(
+                subject="Stock Updated",
+                body=f"Updated {old_symbol} to {new_symbol} in your watchlist."
+            )
+    return render_template("index.html", watchlist=watchlist)
+
+@app.route("/delete", methods=["POST"])
+def delete_stock():
+    global watchlist
+    symbol = request.form.get("symbol")
+    if symbol in watchlist:
+        watchlist.remove(symbol)
+        send_email(
+            subject="Stock Removed",
+            body=f"Removed {symbol} from your watchlist."
+        )
+    return render_template("index.html", watchlist=watchlist)
+
+@app.route("/autocomplete", methods=["GET"])
+def autocomplete():
+    query = request.args.get("q", "").upper()
+    suggestions = [
+        {"id": code, "name": name}
+        for code, name in stock_dict.items()
+        if query in str(code) or query in name.upper()
+    ][:10]  # Top 10 matches
+    return {"suggestions": suggestions}
+
 def get_stock_data(stock_symbol):
     stock = yf.Ticker(stock_symbol)
-    data = stock.history(period="2d")  # Get 2 days of data
+    data = stock.history(period="2d")
     if len(data) >= 2:
         prev_close = data["Close"].iloc[-2]
         current_price = data["Close"].iloc[-1]
@@ -48,34 +88,23 @@ def get_stock_data(stock_symbol):
 def get_bse_announcements(stock_symbol):
     url = "https://www.bseindia.com/data/xml/notices.xml"
     response = requests.get(url)
-    soup = BeautifulSoup(response.content, "lxml-xml")  # Use lxml-xml instead of "xml"
+    soup = BeautifulSoup(response.content, "lxml-xml")
     items = soup.find_all("item")
     for item in items:
         title = item.find("title").text
-        if stock_symbol.split(".")[0] in title:  # Check if stock is mentioned
+        if stock_symbol.split(".")[0] in title:
             return title
     return None
 
 def send_email(subject, body):
-    print(f"Attempting to send email: {subject}")
-    print(f"Using EMAIL_ADDRESS: {EMAIL_ADDRESS}")
-    print(f"Using EMAIL_PASSWORD: {EMAIL_PASSWORD}")
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = EMAIL_ADDRESS
     msg["To"] = EMAIL_ADDRESS
-
-    try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            print("Connecting to SMTP server...")
-            server.starttls()
-            print("Starting TLS...")
-            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-            print("Logged in successfully")
-            server.send_message(msg)
-            print("Email sent successfully")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        server.send_message(msg)
 
 def monitor_stocks():
     while True:
@@ -87,16 +116,13 @@ def monitor_stocks():
             announcement = get_bse_announcements(stock)
             if announcement:
                 updates.append(f"{stock} Announcement: {announcement}")
-
         if updates:
             send_email("Stock Update - " + time.ctime(), "\n".join(updates))
-        
-        time.sleep(300)  # Check every 5 minutes
+        time.sleep(300)  # Every 5 minutes
 
 if __name__ == "__main__":
-    # Start monitoring in a separate thread
     monitor_thread = threading.Thread(target=monitor_stocks)
     monitor_thread.daemon = True
     monitor_thread.start()
-    # Run the Flask app
     app.run(host="0.0.0.0", port=5000)
+    
